@@ -5,14 +5,17 @@ from http.client import InvalidURL
 import base64
 import ssl
 import json
+import logging
 import urllib.request
 from pathlib import Path
 from dataclasses import dataclass, asdict
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
 cache: dict = {}
 
 cwd = Path(__file__).parent
-print("cwd:", cwd)
+logging.info(f"cwd: {cwd}")
 
 
 @dataclass
@@ -32,9 +35,9 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def get(self, url: str, headers: dict) -> HttpResponse:
         # cannot use requests, because it strips additional double slashes // in url
-        print("GET", url)
+        logging.info(f"GET {url}")
         for k, v in headers.items():
-            print(f"> {k}: {v}")
+            logging.info(f"> {k}: {v}")
         req = urllib.request.Request(url, headers=headers)
         try:
             context = ssl._create_unverified_context()
@@ -63,16 +66,16 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
         # this adds an additional / between host and path (path already starts with /)
         # this is needed for assets, or it will return 404 always.
         url = f"https://{host}/{path}"
-        print("Host:", host, "Path:", path)
+        logging.info(f"Host: {host} Path: {path}")
         if "update.wifiradiofrontier.com" in host:
-            print("updates -- blocked")
+            logging.info("updates -- blocked")
             self.send_response(404)
             self.end_headers()
             self.wfile.write(b"404 - updates blocked\n")
             return
         fromcache = url in cache
         if fromcache:
-            print("from cache")
+            logging.info("from cache")
             req = cache[url]
             # print(type(req))
             # print(req)
@@ -91,10 +94,10 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
         if fromcache:
             return
         if req.status_code != 200:
-            print(f"error: {req.status_code}")
-            print(req.content.decode())
+            logging.info(f"error: {req.status_code}")
+            logging.info(req.content.decode())
             return
-        print("write cache...", end="")
+        logging.info("save cache...")
         Path(outfilebase).parent.mkdir(parents=True, exist_ok=True)
         with open(f"{outfilebase}.req", "wb") as f:
             f.write(bytes(f"{self.command} {self.path} {self.request_version}\n", encoding="utf-8"))
@@ -104,7 +107,6 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
         if req.content:
             with open(f"{outfilebase}.content", "wb") as f:
                 f.write(req.content)
-        print(" done.")
 
 
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
