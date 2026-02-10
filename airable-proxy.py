@@ -6,6 +6,7 @@ import base64
 import ssl
 import json
 import logging
+import signal
 import urllib.request
 from pathlib import Path
 from dataclasses import dataclass, asdict
@@ -16,6 +17,17 @@ cache: dict = {}
 
 cwd = Path(__file__).parent
 logging.info(f"cwd: {cwd}")
+
+
+# handle sigterm (container stop) and sigint (ctrl-C)
+def handle_signal(sig, frame):
+    sig_name = signal.Signals(sig).name
+    logging.info(f"signal {sig} {sig_name}... exit")
+    raise SystemExit
+
+
+signal.signal(signal.SIGINT, handle_signal)
+signal.signal(signal.SIGTERM, handle_signal)
 
 
 @dataclass
