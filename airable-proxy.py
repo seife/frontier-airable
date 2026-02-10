@@ -14,6 +14,7 @@ cache: dict = {}
 cwd = Path(__file__).parent
 print("cwd:", cwd)
 
+
 @dataclass
 class HttpResponse:
     status_code: int
@@ -51,14 +52,17 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def json_encode(self, obj):
         if isinstance(obj, bytes):
-            return base64.b64encode(obj).decode('utf-8')
+            return base64.b64encode(obj).decode("utf-8")
         raise TypeError(f"Type {type(obj)} not serializable")
 
     def do_GET(self):
         host = self.headers["Host"]
         path = self.path
-        outfilebase = f"{host}{path}"
+        outfilebase = f"{cwd}/{host}{path}"
         assets = host == "assets.wifiradiofrontier.com"
+        # this adds an additional / between host and path (path already starts with /)
+        # this is needed for assets, or it will return 404 always.
+        url = f"https://{host}/{path}"
         print("Host:", host, "Path:", path)
         if "update.wifiradiofrontier.com" in host:
             print("updates -- blocked")
@@ -66,20 +70,17 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"404 - updates blocked\n")
             return
-        fromcache = outfilebase in cache
+        fromcache = url in cache
         if fromcache:
             print("from cache")
-            req = cache[outfilebase]
+            req = cache[url]
             # print(type(req))
             # print(req)
             # print(json.dumps(asdict(req), default=self.json_encode))
         else:
-            # this adds an additional / between host and path (path already starts with /)
-            # this is needed for assets, or it will return 404 always.
-            url = f"https://{host}/{path}"
             req = self.get(url, headers=self.headers)
             if req.status_code == 200:
-                cache[outfilebase] = req
+                cache[url] = req
         self.send_response(req.status_code)
         for k, v in req.headers.items():
             self.send_header(k, v)
@@ -94,14 +95,14 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
             print(req.content.decode())
             return
         print("write cache...", end="")
-        Path(outfilebase.rsplit("/", maxsplit=1)[0]).mkdir(parents=True, exist_ok=True)
-        with open(f"{cwd}/{outfilebase}.req", "wb") as f:
+        Path(outfilebase).parent.mkdir(parents=True, exist_ok=True)
+        with open(f"{outfilebase}.req", "wb") as f:
             f.write(bytes(f"{self.command} {self.path} {self.request_version}\n", encoding="utf-8"))
             f.write(bytes(self.headers))
-        with open(f"{cwd}/{outfilebase}.ret", "wb") as f:
+        with open(f"{outfilebase}.ret", "wb") as f:
             f.write(bytes(json.dumps(dict(req.headers)), encoding="utf-8"))
         if req.content:
-            with open(f"{cwd}/{outfilebase}.content", "wb") as f:
+            with open(f"{outfilebase}.content", "wb") as f:
                 f.write(req.content)
         print(" done.")
 
