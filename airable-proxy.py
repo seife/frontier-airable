@@ -1,0 +1,115 @@
+#!/usr/bin/python3
+
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.client import InvalidURL
+import base64
+import ssl
+import json
+import urllib.request
+from pathlib import Path
+from dataclasses import dataclass, asdict
+
+cache: dict = {}
+
+cwd = Path(__file__).parent
+print("cwd:", cwd)
+
+@dataclass
+class HttpResponse:
+    status_code: int
+    headers: dict
+    content: bytes
+
+
+class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+
+    def __respond(self, code: int, data: bytes) -> None:
+        self.send_response(code)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def get(self, url: str, headers: dict) -> HttpResponse:
+        # cannot use requests, because it strips additional double slashes // in url
+        print("GET", url)
+        for k, v in headers.items():
+            print(f"> {k}: {v}")
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            context = ssl._create_unverified_context()
+            u = urllib.request.urlopen(req, context=context)
+        except urllib.error.HTTPError as e:
+            u = e
+        except urllib.error.URLError as e:
+            return HttpResponse(status_code=500, headers={}, content=str(e).encode("utf-8"))
+        except InvalidURL as e:
+            return HttpResponse(status_code=500, headers={}, content=str(e).encode("utf-8"))
+        head = {}
+        for k, v in u.headers.items():
+            head[k] = v
+        return HttpResponse(status_code=u.status, headers=head, content=u.read())
+
+    def json_encode(self, obj):
+        if isinstance(obj, bytes):
+            return base64.b64encode(obj).decode('utf-8')
+        raise TypeError(f"Type {type(obj)} not serializable")
+
+    def do_GET(self):
+        host = self.headers["Host"]
+        path = self.path
+        outfilebase = f"{host}{path}"
+        assets = host == "assets.wifiradiofrontier.com"
+        print("Host:", host, "Path:", path)
+        if "update.wifiradiofrontier.com" in host:
+            print("updates -- blocked")
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b"404 - updates blocked\n")
+            return
+        fromcache = outfilebase in cache
+        if fromcache:
+            print("from cache")
+            req = cache[outfilebase]
+            # print(type(req))
+            # print(req)
+            # print(json.dumps(asdict(req), default=self.json_encode))
+        else:
+            # this adds an additional / between host and path (path already starts with /)
+            # this is needed for assets, or it will return 404 always.
+            url = f"https://{host}/{path}"
+            req = self.get(url, headers=self.headers)
+            if req.status_code == 200:
+                cache[outfilebase] = req
+        self.send_response(req.status_code)
+        for k, v in req.headers.items():
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(req.content)
+        if assets:
+            return
+        if fromcache:
+            return
+        if req.status_code != 200:
+            print(f"error: {req.status_code}")
+            print(req.content.decode())
+            return
+        print("write cache...", end="")
+        Path(outfilebase.rsplit("/", maxsplit=1)[0]).mkdir(parents=True, exist_ok=True)
+        with open(f"{cwd}/{outfilebase}.req", "wb") as f:
+            f.write(bytes(f"{self.command} {self.path} {self.request_version}\n", encoding="utf-8"))
+            f.write(bytes(self.headers))
+        with open(f"{cwd}/{outfilebase}.ret", "wb") as f:
+            f.write(bytes(json.dumps(dict(req.headers)), encoding="utf-8"))
+        if req.content:
+            with open(f"{cwd}/{outfilebase}.content", "wb") as f:
+                f.write(req.content)
+        print(" done.")
+
+
+context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+context.load_cert_chain(certfile=f"{cwd}/cert.pem", keyfile=f"{cwd}/key.pem")
+context.check_hostname = False
+
+httpd = HTTPServer(("0.0.0.0", 443), SimpleHTTPRequestHandler)
+httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+httpd.serve_forever()
