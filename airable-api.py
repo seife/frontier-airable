@@ -129,11 +129,10 @@ def build_radios_hash():
         folder["content"] = {"entries": []}  # a folder has place for entries...
         return folder
 
-    top_stations = []
-    top_entries = []
     ret = {}
     # the top level container
     ret["dir"] = get_folder("Radios", "dir")
+    top_entries = []
     for folder, entries in radios.items():
         if folder == "station":
             continue
@@ -149,9 +148,8 @@ def build_radios_hash():
         ret[f"dir/{folder}"]["content"]["entries"].extend(f_stations)
     if "station" in radios:
         for key, entry in radios["station"].items():
-            top_stations.append(get_entry("radio", entry["name"], f"{key}"))
+            top_entries.append(get_entry("radio", entry["name"], f"{key}"))
     ret["dir"]["content"]["entries"].extend(top_entries)
-    ret["dir"]["content"]["entries"].extend(top_stations)
     return ret
 
 
@@ -175,14 +173,14 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def generate_radios(self, path: str) -> None:
         subpath = path[5:]  # strip /api/
         resp = radios_hash[subpath]
-        return self.__respond(200, json.dumps(resp, indent=2).encode(), "application/json")
+        return self.__respond(200, json.dumps(resp).encode(), "application/json")
 
     def get_radio(self, path) -> None:
         if not path.startswith(("/api/radio/", "/api/play/")):  # paranoia, programming error...
             return self.__respond(500, b"get_radio internal error\n")
         command, key = path.split("/", maxsplit=3)[-2:]  # remove /api/radio or /api/play
         if "/" in key:  # from a folder
-            folder, key_id = key.split("/", maxsplit=1)
+            folder = key.split("/", maxsplit=1)[0]
             radio = radios[folder]["station"][key]
         else:
             radio = radios["station"][key]
