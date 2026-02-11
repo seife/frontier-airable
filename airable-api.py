@@ -262,9 +262,8 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
 
 
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-context.load_cert_chain(certfile=f"{cwd}/cert.pem", keyfile=f"{cwd}/key.pem")
-context.check_hostname = False
-radios = load_stations(f"{cwd}/stations.toml")
+context.load_cert_chain(certfile=str(cwd / "cert.pem"), keyfile=str(cwd / "key.pem"))
+radios = load_stations(str(cwd / "stations.toml"))
 radios_hash = build_radios_hash()
 
 # print("====RADIOS====")
