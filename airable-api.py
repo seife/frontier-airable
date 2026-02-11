@@ -162,7 +162,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def __respond(self, code: int, data: bytes, content_type: str = "") -> None:
         if not content_type:
-            if code in (404, 500):
+            if code in (403, 404, 500):
                 content_type = "text/plain"
             else:
                 logging.warning("__respond: content_type is empty!")
@@ -224,15 +224,22 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def get_logo(self, path: str) -> None:
         mime = "image/png"
+        requested = (cwd / path.lstrip("/")).resolve()  # avoid path traversal
+        if not str(requested).startswith(str(cwd / "logos")):
+            return self.__respond(403, b"403 - Forbidden\n")
         try:
-            with open(f"{cwd}{path}", "rb") as f:
+            with open(f"{requested}", "rb") as f:
                 content = f.read()
-            if path.lower().endswith((".jpeg", ".jpg")):  # for future expansion ;-)
+            if requested.suffix.lower() in (".jpeg", ".jpg"):  # for future expansion ;-)
                 mime = "image/jpeg"
-        except FileNotFoundError:
+        except (FileNotFoundError, IsADirectoryError):
             logging.info(f"{path} not found, send default")
-            with open(f"{cwd}/logos/logo-internet-radio.png", "rb") as f:
-                content = f.read()
+            try:
+                with open(cwd / "logos/logo-internet-radio.png", "rb") as f:
+                    content = f.read()
+            except FileNotFoundError:
+                logging.error("logos/logo-internet-radio.png not found?")
+                return self.__respond(404, b"404 - not found\n")
         self.__respond(200, content, mime)
 
     def do_GET(self):
