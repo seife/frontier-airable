@@ -1,0 +1,65 @@
+
+[News]
+label = "News Stations"
+
+  [[News.station]]
+  id = "dlf"
+  name = "Deutschlandfunk"
+  url = "http://st01.dlf.de/dlf/01/mid/aac/stream.aac"
+
+  [[News.station]]
+  id = "bbc_worldservice"
+  url = "http://stream.live.vc.bbcmedia.co.uk/bbc_world_service"
+  name = "BBC World Service"
+
+[Music]
+label = "Music Radios"
+
+  [[Music.station]]
+  id = "bestof80s"
+  url = "http://bestof80s.stream.laut.fm/best_of_80s"
+  name = "laut.fm - Best of 80s"
+
+  [[Music.station]]
+  id = "70s_classics"
+  url = "http://kea.cdnstream.com:80/1897_128"
+  name = "70s Classics"
+
+  [[Music.station]]
+  id = "absolut_oldies"
+  url = "http://absolut-oldieclassics.live-sm.absolutradio.de/absolut-oldieclassics"
+  name = "Absolut Oldies"
+
+  [[Music.station]]
+  id = "80s80s"
+  url = "http://streams.80s80s.de/80s80sDAB/mp3-128/streams.80s80s.de"
+  name = "80s80s"
+
+  [[Music.station]]
+  id = "softrock"
+  url = "http://gold.streamguys1.com/softrock.mp3"
+  name = "Soft Rock Radio"
+
+[Local]
+label = "Local Radios"
+
+  [[Local.station]]
+  id = "mdr1_dd"
+  url = "http://mdr-284280-0.cast.mdr.de/mdr/284280/0/mp3/high/stream.mp3"
+  name = "MDR1 Dresden"
+
+  [[Local.station]]
+  id = "mdr1_bz"
+  url = "http://mdr-284280-1.cast.mdr.de/mdr/284280/1/mp3/high/stream.mp3"
+  name = "MDR1 Bautzen"
+
+# these are in the top level menu
+[[station]]
+  id = "dlf"
+  url = "http://st01.dlf.de/dlf/01/high/aac/stream.aac"
+  name = "dlf"
+
+[[station]]
+  id = "dlr"
+  url = "http://st02.dlf.de/dlf/02/high/aac/stream.aac"
+  name = "DLR"
