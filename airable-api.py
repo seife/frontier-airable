@@ -160,7 +160,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def __respond(self, code: int, data: bytes, content_type: str = "") -> None:
         if not content_type:
-            if code in (403, 404, 500):
+            if code in (400, 403, 404, 500):
                 content_type = "text/plain"
             else:
                 logging.warning("__respond: content_type is empty!")
@@ -172,6 +172,8 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def generate_radios(self, path: str) -> None:
         subpath = path[5:]  # strip /api/
+        if subpath not in radios_hash:
+            return self.__respond(400, b"Bad request, generate_radios")
         resp = radios_hash[subpath]
         return self.__respond(200, json.dumps(resp).encode(), "application/json")
 
@@ -179,46 +181,49 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
         if not path.startswith(("/api/radio/", "/api/play/")):  # paranoia, programming error...
             return self.__respond(500, b"get_radio internal error\n")
         command, key = path.split("/", maxsplit=3)[-2:]  # remove /api/radio or /api/play
-        if "/" in key:  # from a folder
-            folder = key.split("/", maxsplit=1)[0]
-            radio = radios[folder]["station"][key]
-        else:
-            radio = radios["station"][key]
-        name = radio["name"]
-        logging.info(f"station {key} ({name}) requested")
-        resp = {
-            "content": {"entries": []},
-            "description": name,
-            "id": ["api", "radio", key],
-            # "language": {"id": ["frontiersmart", "language", "5287211298011244"], "title": "German", "iso": "de"},
-            # "place": {"id": ["frontiersmart", "place", "1234567890ABCDEF"], "title": "Place", "type": "city"},
-            "slogan": f"slogan {key}",
-            "images": [
-                {
-                    "url": f"https://airable.wifiradiofrontier.com/logos/{key}.png",
-                    "size": [1, 1],  # if size is [0,0], the logo is not loaded
-                    "type": "cover",
-                }
-            ],
-            "streams": [
-                {
-                    "codec": {
-                        "bitrate": 96,
-                        "name": "AAC",
-                    },  # this does not matter, but must be present
-                    "id": ["api", "stream", key],
-                    "reliability": 1,
-                    "url": f"https://airable.wifiradiofrontier.com/api/play/{key}",
-                }
-            ],
-            "title": name,
-            "url": f"https://airable.wifiradiofrontier.com/api/radio/{key}",
-        }
-        if command == "play":
-            resp["id"] = ["api", "redirect", key]
-            resp["url"] = radio["url"]
-            logging.info(f"redirecting to {radio['url']}")
-        self.__respond(200, json.dumps(resp).encode(), "application/json")
+        try:
+            if "/" in key:  # from a folder
+                folder = key.split("/", maxsplit=1)[0]
+                radio = radios[folder]["station"][key]
+            else:
+                radio = radios["station"][key]
+            name = radio["name"]
+            logging.info(f"station {key} ({name}) requested")
+            resp = {
+                "content": {"entries": []},
+                "description": name,
+                "id": ["api", "radio", key],
+                # "language": {"id": ["frontiersmart", "language", "5287211298011244"], "title": "German", "iso": "de"},
+                # "place": {"id": ["frontiersmart", "place", "1234567890ABCDEF"], "title": "Place", "type": "city"},
+                "slogan": f"slogan {key}",
+                "images": [
+                    {
+                        "url": f"https://airable.wifiradiofrontier.com/logos/{key}.png",
+                        "size": [1, 1],  # if size is [0,0], the logo is not loaded
+                        "type": "cover",
+                    }
+                ],
+                "streams": [
+                    {
+                        "codec": {
+                            "bitrate": 96,
+                            "name": "AAC",
+                        },  # this does not matter, but must be present
+                        "id": ["api", "stream", key],
+                        "reliability": 1,
+                        "url": f"https://airable.wifiradiofrontier.com/api/play/{key}",
+                    }
+                ],
+                "title": name,
+                "url": f"https://airable.wifiradiofrontier.com/api/radio/{key}",
+            }
+            if command == "play":
+                resp["id"] = ["api", "redirect", key]
+                resp["url"] = radio["url"]
+                logging.info(f"redirecting to {radio['url']}")
+            self.__respond(200, json.dumps(resp).encode(), "application/json")
+        except KeyError:
+            self.__respond(400, b"Bad request, get_radio\n")
 
     def get_logo(self, path: str) -> None:
         mime = "image/png"
