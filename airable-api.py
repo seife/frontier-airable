@@ -49,6 +49,7 @@ signal.signal(signal.SIGTERM, handle_signal)
 
 hostname = os.environ.get("AIRABLE_HOSTNAME", "airable.wifiradiofrontier.com")
 
+radios: Dict[str, Any] = {}
 radios_hash: Dict[str, Any] = {}
 xmlid_rev: Dict[str, Any] = {}
 cwd = Path(__file__).parent
@@ -159,6 +160,13 @@ def build_radios_hash() -> dict:
             top_entries.append(get_entry("radio", entry["name"], f"{key}"))
     ret["dir"]["content"]["entries"].extend(top_entries)
     return ret
+
+
+def reload() -> None:
+    global radios
+    global radios_hash
+    radios = load_stations(str(cwd / "stations.toml"))
+    radios_hash = build_radios_hash()
 
 
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
@@ -416,11 +424,12 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
             return self.handle_setupapp(path)
         if path.startswith("/logos"):
             return self.get_logo(path)
+        if path == "/reload":
+            reload()
+            if "error" in radios:
+                return self.__respond(500, radios["error"].encode())
+            return self.__respond(200, b"reload ok\n", "text/plain")
         self.__respond(404, b"404 - not found\n")
-
-
-radios = load_stations(str(cwd / "stations.toml"))
-radios_hash = build_radios_hash()
 
 
 def run_http_server(port, use_ssl=False):
@@ -442,6 +451,7 @@ def run_http_server(port, use_ssl=False):
 # print("====RADIOS_HASH====")
 # print(json.dumps(radios_hash, indent=2))
 def main():
+    reload()
     try:
         # run http (port 80) in its own thread
         thread_80 = threading.Thread(target=run_http_server, args=(80, False))
