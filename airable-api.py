@@ -26,7 +26,9 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import ssl
 import json
 import logging
+import os
 import signal
+import threading
 import tomllib
 from pathlib import Path
 from typing import Dict, Any
@@ -44,6 +46,7 @@ def handle_signal(sig, frame):
 signal.signal(signal.SIGINT, handle_signal)
 signal.signal(signal.SIGTERM, handle_signal)
 
+hostname = os.environ.get("AIRABLE_HOSTNAME", "airable.wifiradiofrontier.com")
 
 radios_hash: Dict[str, Any] = {}
 cwd = Path(__file__).parent
@@ -198,7 +201,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
                 "slogan": f"slogan {key}",
                 "images": [
                     {
-                        "url": f"https://airable.wifiradiofrontier.com/logos/{key}.png",
+                        "url": f"http://{hostname}/logos/{key}.png",
                         "size": [1, 1],  # if size is [0,0], the logo is not loaded
                         "type": "cover",
                     }
@@ -264,18 +267,37 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
         self.__respond(404, b"404 - not found\n")
 
 
-context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-context.load_cert_chain(certfile=str(cwd / "cert.pem"), keyfile=str(cwd / "key.pem"))
 radios = load_stations(str(cwd / "stations.toml"))
 radios_hash = build_radios_hash()
+
+
+def run_http_server(port, use_ssl=False):
+    server_address = ("", port)
+    httpd = HTTPServer(server_address, SimpleHTTPRequestHandler)
+    if use_ssl:
+        # SSL-Kontext für Port 443 erstellen
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certfile=str(cwd / "cert.pem"), keyfile=str(cwd / "key.pem"))
+        httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+        logging.info(f"HTTPS-Server started on port {port}")
+    else:
+        logging.info(f"HTTP-Server started on port {port}")
+    httpd.serve_forever()
+
 
 # print("====RADIOS====")
 # print(json.dumps(radios, indent=2))
 # print("====RADIOS_HASH====")
 # print(json.dumps(radios_hash, indent=2))
 try:
-    httpd = HTTPServer(("0.0.0.0", 443), SimpleHTTPRequestHandler)
+    # run http (port 80) in its own thread
+    thread_80 = threading.Thread(target=run_http_server, args=(80, False))
+    thread_80.daemon = True
+    thread_80.start()
+    # run HTTPS (port 443) in main thread
+    run_http_server(443, True)
 except PermissionError:  # only for testing, will not work with the radio...
-    httpd = HTTPServer(("0.0.0.0", 8443), SimpleHTTPRequestHandler)
-httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
-httpd.serve_forever()
+    thread_80 = threading.Thread(target=run_http_server, args=(8080, False))
+    thread_80.daemon = True
+    thread_80.start()
+    run_http_server(8443, True)
