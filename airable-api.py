@@ -440,15 +440,20 @@ def run_http_server(port, use_ssl=False):
 # print(json.dumps(radios, indent=2))
 # print("====RADIOS_HASH====")
 # print(json.dumps(radios_hash, indent=2))
-try:
-    # run http (port 80) in its own thread
-    thread_80 = threading.Thread(target=run_http_server, args=(80, False))
-    thread_80.daemon = True
-    thread_80.start()
-    # run HTTPS (port 443) in main thread
-    run_http_server(443, True)
-except PermissionError:  # only for testing, will not work with the radio...
-    thread_80 = threading.Thread(target=run_http_server, args=(8080, False))
-    thread_80.daemon = True
-    thread_80.start()
-    run_http_server(8443, True)
+def main():
+    try:
+        # run http (port 80) in its own thread
+        thread_80 = threading.Thread(target=run_http_server, args=(80, False))
+        thread_80.daemon = True
+        thread_80.start()
+        # run HTTPS (port 443) in main thread
+        run_http_server(443, True)
+    except PermissionError:  # only for testing, will not work with the radio...
+        thread_80 = threading.Thread(target=run_http_server, args=(8080, False))
+        thread_80.daemon = True
+        thread_80.start()
+        run_http_server(8443, True)
+
+
+if __name__ == "__main__":
+    main()
