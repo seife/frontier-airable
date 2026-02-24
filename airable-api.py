@@ -24,6 +24,7 @@
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import ssl
+import binascii
 import json
 import logging
 import os
@@ -31,7 +32,7 @@ import signal
 import threading
 import tomllib
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 
@@ -49,10 +50,12 @@ signal.signal(signal.SIGTERM, handle_signal)
 hostname = os.environ.get("AIRABLE_HOSTNAME", "airable.wifiradiofrontier.com")
 
 radios_hash: Dict[str, Any] = {}
+xmlid_rev: Dict[str, Any] = {}
 cwd = Path(__file__).parent
 logging.info(f"cwd: {cwd}")
 
 
+# this is for the FS2340 modules, which only do https
 index = {
     "id": ["airable", "directory", "index"],
     "title": "Index",
@@ -62,12 +65,12 @@ index = {
             {  # radio stations
                 "id": ["api", "service", "radio"],
                 "title": "Internet radio",
-                "url": "https://airable.wifiradiofrontier.com/api/dir",
+                "url": "_APIBASE_/dir",
             },
             # {  # podcast feeds / not yet implemented
             #     "id": ["api", "service", "feed"],
             #     "title": "Podcasts",
-            #     "url": "https://airable.wifiradiofrontier.com/api/feeds"
+            #     "url": "_APIBASE_/feeds"
             # }
         ]
     },
@@ -111,19 +114,21 @@ def load_stations(file: str) -> dict:
     return ret
 
 
-def build_radios_hash():
+def build_radios_hash() -> dict:
 
     def get_entry(kind: str, name: str, path: str, idname: str = "") -> dict:
-        if kind == "radio":
-            urlpath = "radio"
-        else:
-            urlpath = path
         if not idname:
             idname = path
+        if kind == "radio":
+            urlpath = "radio"
+            station_id = binascii.crc32(idname.encode())
+            xmlid_rev[f"{station_id}"] = path  # string, because search is string also...
+        else:
+            urlpath = path
         entry = {
             "id": ["api", kind, idname],
             "title": name,
-            "url": f"https://airable.wifiradiofrontier.com/api/{urlpath}",
+            "url": f"_APIBASE_/{urlpath}",
         }
         return entry
 
@@ -178,7 +183,8 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
         if subpath not in radios_hash:
             return self.__respond(400, b"Bad request, generate_radios")
         resp = radios_hash[subpath]
-        return self.__respond(200, json.dumps(resp).encode(), "application/json")
+        apiurl = f"https://{hostname}/api"
+        return self.__respond(200, json.dumps(resp).replace("_APIBASE_", apiurl).encode(), "application/json")
 
     def get_radio(self, path) -> None:
         if not path.startswith(("/api/radio/", "/api/play/")):  # paranoia, programming error...
@@ -214,19 +220,39 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
                         },  # this does not matter, but must be present
                         "id": ["api", "stream", key],
                         "reliability": 1,
-                        "url": f"https://airable.wifiradiofrontier.com/api/play/{key}",
+                        "url": f"_APIBASE_/play/{key}",
                     }
                 ],
                 "title": name,
-                "url": f"https://airable.wifiradiofrontier.com/api/radio/{key}",
+                "url": f"_APIBASE_/radio/{key}",
             }
             if command == "play":
                 resp["id"] = ["api", "redirect", key]
                 resp["url"] = radio["url"]
                 logging.info(f"redirecting to {radio['url']}")
-            self.__respond(200, json.dumps(resp).encode(), "application/json")
+            apiurl = f"https://{hostname}/api"
+            self.__respond(200, json.dumps(resp).replace("_APIBASE_", apiurl).encode(), "application/json")
         except KeyError:
             self.__respond(400, b"Bad request, get_radio\n")
+
+    def get_xmlradio(self, path) -> None:
+        mime = "text/html; charset=UTF-8"  # it is actually XML, but that's what the frontier servers return...
+        if not path.startswith("/xmlapi/radio/"):  # paranoia, programming error...
+            return self.__respond(500, b"get_xmlradio internal error\n")
+        command, key = path.split("/", maxsplit=3)[-2:]  # remove /api/radio or /api/play
+        try:
+            if "/" in key:  # from a folder
+                folder = key.split("/", maxsplit=1)[0]
+                radio = radios[folder]["station"][key]
+            else:
+                radio = radios["station"][key]
+            name = radio["name"]
+            logging.info(f"station {key} ({name}) requested")
+            mime = "audio/x-mpegurl"
+            logging.info(f"redirecting to {radio['url']}")
+            return self.__respond(200, radio["url"].encode(), mime)
+        except KeyError:
+            self.__respond(400, b"Bad request, get_xmlradio\n")
 
     def get_logo(self, path: str) -> None:
         mime = "image/png"
@@ -248,8 +274,126 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
                 return self.__respond(404, b"404 - not found\n")
         self.__respond(200, content, mime)
 
+    def get_station_xml(self, station: dict, mac: str) -> str:
+        if station["id"][1] != "radio":
+            return ""
+        path = station["id"][2]
+        title = station["title"]
+        surl = station["url"]
+        url = surl.replace("_APIBASE_", f"http://{self.hhost}/xmlapi")
+        station_id = binascii.crc32(path.encode())
+        url += f"/{path}"
+        xml = (
+            "  <Item>\n    <ItemType>Station</ItemType>\n"
+            f"    <StationId>{station_id}</StationId>\n"
+            f"    <StationName>{title}</StationName>\n"
+            f"    <StationUrl>{url}{mac}</StationUrl>\n"
+            f"    <StationDesc>{title} desc</StationDesc>\n"
+            f"    <Logo>http://{hostname}/logos/{path}.png</Logo>\n"
+            "    <StationFormat>Radio</StationFormat>\n"
+            "    <StationLocation>Earth</StationLocation>\n"
+            "    <StationBandWidth>32</StationBandWidth>\n"
+            "    <StationMime>MP3</StationMime>\n"
+            "    <Relia>5</Relia>\n"
+            "  </Item>\n"
+        )
+        return xml
+
+    def dict2xml(self, subpath: str, args: str = "") -> Tuple[bool, str]:
+        try:
+            data = radios_hash[subpath]["content"]["entries"]
+        except KeyError:
+            return False, f"Bad request, dict2xml {subpath}"
+        """
+        mac = ""
+        if args:
+            for arg in args.split("&"):
+                if arg.startswith("mac="):
+                    mac = f"?{arg}"
+                    break
+        """
+        xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        xml += f"<ListOfItems>\n  <ItemCount>{len(data)}</ItemCount>\n"
+        if subpath != "dir":
+            xml += (
+                "  <Item>\n    <ItemType>Previous</ItemType>\n"
+                f"    <UrlPrevious>http://{self.hhost}/xmlapi/dir</UrlPrevious>\n"
+                f"    <UrlPreviousBackUp>http://{self.hhost}/xmlapi/dir</UrlPreviousBackUp>\n"
+                "  </Item>\n"
+            )
+        for i in data:
+            itype = i["id"][1]
+            if itype == "radio":
+                # xml += self.get_station_xml(i, mac)
+                xml += self.get_station_xml(i, "")
+            else:
+                ititle = i["title"]
+                iurl = i["url"]
+                url = iurl.replace("_APIBASE_", f"http://{self.hhost}/xmlapi")
+                xml += (
+                    "  <Item>\n"
+                    "    <ItemType>Dir</ItemType>\n"
+                    f"    <Title>{ititle}</Title>\n"
+                    f"    <UrlDir>{url}</UrlDir>\n"
+                    f"    <UrlDirBackup>{url}</UrlDirBackup>\n"
+                    "  </Item>\n"
+                )
+        xml += "</ListOfItems>\n"
+        return True, xml
+
+    def generate_xmlradios(self, path: str) -> None:
+        subpath = path[8:]  # strip /xmlapi/
+        subpath, args = subpath.split("?", maxsplit=1)
+        if subpath not in radios_hash:
+            return self.__respond(400, b"Bad request, generate_xmlradios")
+        ok, xml = self.dict2xml(subpath)
+        if ok:
+            return self.__respond(200, xml.encode(), "text/html; charset=UTF-8")
+        return self.__respond(400, xml.encode())
+
+    def handle_setupapp(self, fullpath: str) -> None:
+        mime = "text/html; charset=UTF-8"  # it is actually XML, but that's what the frontier servers return...
+        path, args = fullpath.split("?", maxsplit=1)
+        pl = path.lower()
+        if pl.endswith("/asp/browsexml/loginxml.asp"):
+            if args == "token=0":
+                return self.__respond(200, b"<EncryptedToken>3a3f5ac48a1dab4e</EncryptedToken>", mime)
+            if args.startswith("gofile=&mac="):
+                ok, xml = self.dict2xml("dir")
+                if ok:
+                    return self.__respond(200, xml.encode(), "text/html; charset=UTF-8")
+                return self.__respond(400, xml.encode())
+            return self.__respond(400, f"bad request, path '{fullpath}'".encode())
+        if pl.endswith("/asp/browsexml/search.asp"):
+            if args.startswith("sSearchtype=3&Search="):
+                search = args.split("&", maxsplit=2)[1]
+                station_id = search[7:]
+                if station_id not in xmlid_rev:
+                    return self.__respond(400, f"{station_id} not found".encode())
+                station = xmlid_rev[station_id]  # News/dlf
+                if "/" in station:
+                    d = station.rsplit("/", maxsplit=1)[0]
+                    d = f"dir/{d}"
+                else:
+                    d = "dir"
+                for e in radios_hash[d]["content"]["entries"]:
+                    if e["id"][2] == station:
+                        logging.info(f"found station: {e}")
+                        xml = (
+                            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+                            "<ListOfItems>\n  <ItemCount>1</ItemCount>\n"
+                        )
+                        xml += self.get_station_xml(e, "")
+                        xml += "</ListOfItems>\n"
+                        return self.__respond(200, xml.encode(), mime)
+                logging.info(f" {station} not found???")
+        return self.__respond(404, b"not found")
+
     def do_GET(self):
         host = self.headers["Host"]
+        self.hhost = host
+        if host == "hama2.wifiradiofrontier.com":  # the radio seems picky about the hostname the urls direct to...
+            self.hhost = "hama.wifiradiofrontier.com"
         path = self.path
         logging.info(f"Host: {host} Path: '{path}'")
         if "update.wifiradiofrontier.com" in host:
@@ -257,11 +401,18 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
             self.__respond(404, b"404 - updates blocked\n")
             return
         if path == "/":
-            return self.__respond(200, json.dumps(index).encode(), "application/json")
+            apiurl = f"https://{hostname}/api"
+            return self.__respond(200, json.dumps(index).replace("_APIBASE_", apiurl).encode(), "application/json")
         if path.startswith("/api/dir"):
             return self.generate_radios(path)
         if path.startswith(("/api/radio/", "/api/play/")):
             return self.get_radio(path)
+        if path.startswith("/xmlapi/dir"):
+            return self.generate_xmlradios(path)
+        if path.startswith("/xmlapi/radio/"):
+            return self.get_xmlradio(path)
+        if path.startswith("/setupapp/"):
+            return self.handle_setupapp(path)
         if path.startswith("/logos"):
             return self.get_logo(path)
         self.__respond(404, b"404 - not found\n")
