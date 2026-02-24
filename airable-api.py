@@ -164,6 +164,7 @@ def build_radios_hash() -> dict:
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def __init__(self, request, client_address, server, directory=None):
         self.directory = directory
+        self.port = server.server_port
         super().__init__(request, client_address, server)
 
     def __respond(self, code: int, data: bytes, content_type: str = "") -> None:
@@ -395,7 +396,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
         if host == "hama2.wifiradiofrontier.com":  # the radio seems picky about the hostname the urls direct to...
             self.hhost = "hama.wifiradiofrontier.com"
         path = self.path
-        logging.info(f"Host: {host} Path: '{path}'")
+        logging.info(f"Host: {host}:{self.port} Path: '{path}'")
         if "update.wifiradiofrontier.com" in host:
             logging.info("updates -- blocked")
             self.__respond(404, b"404 - updates blocked\n")
